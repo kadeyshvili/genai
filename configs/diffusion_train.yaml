@@ -1,0 +1,52 @@
+exp:
+    exp_dir: experiments
+    device: cuda
+    seed: 777
+    use_wandb: True
+    model_type: diffusion
+    name: test
+    base_dir: /Users/polinakadeyshvili/Downloads/genai_projects_task-main-2
+
+data:
+    name: base_dataset
+    input_train_dir: /Users/polinakadeyshvili/Downloads/food-101/images
+    input_val_dir: /Users/polinakadeyshvili/Downloads/food-101/images
+    train_batch_size: 8
+    val_batch_size: 8
+    workers: 8
+
+train:
+    trainer: base_diffusion_trainer
+    model: base_diffusion
+    optimizer: adam
+    checkpoint_path: null
+    val_metrics: ["fid"]
+    start_step: 0
+    steps: 300000
+    log_step: 500
+    checkpoint_step: 15000
+    val_step: 15000
+
+
+model_args:
+    hidden_dim: 512
+
+optimizer_args:
+    lr: 0.0001
+
+losses_coef:
+    mse: 1.0
+
+logger:
+    project_name: "genai"
+    entity: null
+    run_name: "test"
+    mode: "online"
+    loss_names: ["loss"] # which losses to log (useful for multi-loss tasks, s.a. GANs)
+    log_checkpoints: False # set to True if you want to log save_dir with checkpoints to W&B
+    id_length: 8 # length of the run_id
+
+to_save:
+    experiment_dir: /Users/polinakadeyshvili/Downloads/genai_projects_task-main-2/saved
+
+
