@@ -6,7 +6,7 @@ import os
 
 class WandbLogger:
     def __init__(self, config):
-        wandb.login(key=os.environ['WANDB_KEY'].strip())
+        wandb.login(key=config.exp.key)
         # if config.train.checkpoint_path != "":
         #     resume_path = self.checkpoint_dir / config.trainer.resume_from
         #     self._resume_checkpoint(resume_path)

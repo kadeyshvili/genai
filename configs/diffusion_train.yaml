@@ -6,6 +6,7 @@ exp:
     model_type: diffusion
     name: test
     base_dir: /Users/polinakadeyshvili/Downloads/genai_projects_task-main-2
+    key: null
 
 data:
     name: base_dataset
