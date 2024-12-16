@@ -42,7 +42,7 @@ class BaseDiffusionTrainer(BaseTrainer):
                 "UpBlock2D",  # a regular ResNet upsampling block
             ),
         )
-        self.device = 'cpu'
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
         self.noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
 
