@@ -14,7 +14,7 @@ class BaseDataset(Dataset):
         self.paths = make_dataset(root)
         self.transforms = transforms.Compose(
             [
-                transforms.Resize((128, 128)),  # Resize
+                transforms.Resize((64, 64)),  # Resize
                 transforms.RandomHorizontalFlip(),  # Randomly flip (data augmentation)
                 transforms.ToTensor(),  # Convert to tensor (0, 1)
                 transforms.Normalize([0.5], [0.5]),  # Map to (-1, 1)

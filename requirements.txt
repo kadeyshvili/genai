@@ -8,3 +8,4 @@ pandas
 wandb
 diffusers
 scipy
+pytorch_fid

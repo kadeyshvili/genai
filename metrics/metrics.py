@@ -1,75 +1,114 @@
+# from utils.class_registry import ClassRegistry
+# from pytorch_fid.fid_score import calculate_fid_given_paths
+# import torch
+
+
+# metrics_registry = ClassRegistry()
+
+
+# @metrics_registry.add_to_registry(name="fid")
+# class FID:
+#     def __init__(self):
+#         pass
+
+#     def __call__(self, orig_pth, synt_pth):
+#         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#         fid = calculate_fid_given_paths([orig_pth, synt_pth],batch_size=16,  device=device, dims=2048)
+#         return fid
+    
+#     def __str__(self):
+#         return "FID"
+    
+#     def __repr__(self):
+#         return "FID"
+from utils.class_registry import ClassRegistry
+from pytorch_fid.fid_score import compute_statistics_of_path, calculate_frechet_distance
 import torch
-from torchvision.models import inception_v3
-from torchvision import transforms
-from torch.nn import functional as F
-from scipy import linalg
-import numpy as np
 from PIL import Image
 import os
-from utils.class_registry import ClassRegistry
-
+import shutil
+import numpy as np
+from pytorch_fid.inception import InceptionV3
 
 metrics_registry = ClassRegistry()
 
+def collect_images_from_class_folders(root_dir):
+    image_paths = []
+    for class_folder in os.listdir(root_dir):
+        class_path = os.path.join(root_dir, class_folder)
+        if os.path.isdir(class_path):
+            for img_file in os.listdir(class_path):
+                if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    image_paths.append(os.path.join(class_path, img_file))
+    return image_paths
+
+def create_temp_folder_with_images(image_paths, temp_dir):
+    os.makedirs(temp_dir, exist_ok=True)
+    for img_path in image_paths:
+        try:
+            img_name = os.path.basename(img_path)
+            temp_path = os.path.join(temp_dir, img_name)
+            if not os.path.exists(temp_path):
+                img = Image.open(img_path)
+                img.save(temp_path)
+        except Exception as e:
+            print(f"Ошибка при обработке {img_path}: {e}")
+    return temp_dir
 
 @metrics_registry.add_to_registry(name="fid")
 class FID:
-    def __init__(self, device='cpu'):
-        self.device = device
-        self.model = inception_v3(pretrained=True, transform_input=False).to(self.device)
-        self.model.eval()
-        self.transform = transforms.Compose([
-            transforms.Resize((299, 299)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+    def __init__(self, test_pth):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.temp_test_dir = "./temp_test_images"
+        self.test_image_paths = collect_images_from_class_folders(test_pth)
+        self.temp_test_dir = self._prepare_temp_folder(self.test_image_paths, self.temp_test_dir)
+        self.dims = 2048
+        block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[self.dims]
+        self.model = InceptionV3([block_idx]).to(self.device)
+        self.batch_size = 128
+        self.test_statistics = compute_statistics_of_path(path=self.temp_test_dir, model=self.model, batch_size=self.batch_size, dims=self.dims, device = self.device)
 
-    def __call__(self, orig_path, synt_path):
-        orig_features = self._compute_inception_activations(orig_path)
-        synt_features = self._compute_inception_activations(synt_path)
+    
+    def _prepare_temp_folder(self, image_paths, temp_dir):
+        return create_temp_folder_with_images(image_paths, temp_dir)
+    
+    
+    def __call__(self, synt_pth):
+        if os.path.isdir(synt_pth) and not any(os.path.isdir(os.path.join(synt_pth, d)) for d in os.listdir(synt_pth)):
+            synt_mean, synt_cov = compute_statistics_of_path(
+                synt_pth,
+                model=self.model,
+                batch_size=self.batch_size,
+                dims=self.dims,
+                device=self.device
+            )
+        else:
+            temp_synt_dir = "./temp_synt_images"
+            synt_image_paths = collect_images_from_class_folders(synt_pth)
+            self._prepare_temp_folder(synt_image_paths, temp_synt_dir)
+            
+            synt_mean, synt_cov = compute_statistics_of_path(
+                temp_synt_dir,
+                model=self.model,
+                batch_size=self.batch_size,
+                dims=self.dims,
+                device=self.device
+            )
+            
+            shutil.rmtree(temp_synt_dir)
 
-        mu1, sigma1 = np.mean(orig_features, axis=0), np.cov(orig_features, rowvar=False)
-        mu2, sigma2 = np.mean(synt_features, axis=0), np.cov(synt_features, rowvar=False)
+        fid = calculate_frechet_distance(
+            self.test_statistics[0], self.test_statistics[1],
+            synt_mean, synt_cov
+        )
+        return fid
 
-        fid_score = self._calculate_frechet_distance(mu1, sigma1, mu2, sigma2)
-        return fid_score
-
-    def _compute_inception_activations(self, images_path):
-        activations = []
-        for img_file in os.listdir(images_path):
-            img_path = os.path.join(images_path, img_file)
-            image = Image.open(img_path).convert('RGB')
-            image = self.transform(image).unsqueeze(0).to(self.device)
-            with torch.no_grad():
-                pred = self.model(image).squeeze(0)
-
-            # Resize logits to 8x8
-            pred = F.adaptive_avg_pool2d(pred.unsqueeze(0), (1, 1)).squeeze()
-            activations.append(pred.cpu().numpy())
-
-        activations = np.array(activations)
-        return activations
-
-    def _calculate_frechet_distance(self, mu1, sigma1, mu2, sigma2, eps=1e-6):
-        """Numpy implementation of the Frechet Distance."""
-        diff = mu1 - mu2
-        covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
-
-        if not np.isfinite(covmean).all():
-            print("WARNING: fid computation produces singular product; adding eps to diagonal of cov estimates")
-            offset = np.eye(sigma1.shape[0]) * eps
-            covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
-
-        # Numerical error might give slight imaginary component
-        if np.iscomplexobj(covmean):
-            if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
-                max_imag_component = np.max(np.abs(covmean.imag))
-                raise ValueError(f"Imaginary component {max_imag_component}")
-            covmean = covmean.real
-
-        tr_covmean = np.trace(covmean)
-        return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
-
-# Example usage within a trainer:
-# fid_metric = FID(device='cuda')
-# fid_score = fid_metric(orig_path='path/to/orig', synt_path='path/to/synt')
+    
+    def __del__(self):
+        shutil.rmtree(self.temp_test_dir, ignore_errors=True)
+    
+    def __str__(self):
+        return "FID"
+    
+    def __repr__(self):
+        return "FID"
