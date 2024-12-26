@@ -2,12 +2,15 @@ from utils.class_registry import ClassRegistry
 from training.trainers.base_trainer import BaseTrainer 
 from models.diffusion_models import diffusion_models_registry 
 from training.optimizers import optimizers_registry 
+from training.schedulers import schedulers_registry 
 from training.losses.diffusion_losses import DiffusionLossBuilder 
 import torch
 from diffusers import DDPMScheduler
 from diffusers import UNet2DModel
 import os
 from torchvision.utils import save_image
+from torch.nn.utils import clip_grad_norm_
+from diffusers.optimization import get_scheduler
 
  
 diffusion_trainers_registry = ClassRegistry() 
@@ -19,6 +22,7 @@ class BaseDiffusionTrainer(BaseTrainer):
         self.setup_models()
         self.setup_optimizers()
         self.setup_losses()
+        self.setup_scheduler()
 
     def setup_models(self):
         self.model = UNet2DModel(
@@ -36,9 +40,10 @@ class BaseDiffusionTrainer(BaseTrainer):
         self.noise_scheduler = DDPMScheduler(num_train_timesteps=self.config.scheduler_args.steps)
 
         if self.config.train.checkpoint_path:
-            checkpoint = torch.load(self.config.checkpoint_path)
-            self.unet.load_state_dict(checkpoint['model_state_dict'])
-            self.noise_scheduler.load_state_dict(checkpoint['noise_scheduler_state_dict'])
+            checkpoint = torch.load(self.config.train.checkpoint_path)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.step = checkpoint['step']
+            self.start_step = self.step
 
     def setup_optimizers(self):
         optimizer_name = self.config.train.optimizer
@@ -46,8 +51,26 @@ class BaseDiffusionTrainer(BaseTrainer):
             self.model.parameters(), self.config.optimizer_args)
         
         if self.config.train.checkpoint_path:
-            checkpoint = torch.load(self.config.checkpoint_path)
+            checkpoint = torch.load(self.config.train.checkpoint_path)
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+
+
+    
+    def setup_scheduler(self):
+        scheduler_name = self.config.lr_scheduler_args.name
+        self.lr_scheduler = get_scheduler(
+            scheduler_name,
+            optimizer=self.optimizer,
+            num_warmup_steps=self.config.lr_scheduler_args.num_warmup_steps,
+            num_training_steps=self.config.lr_scheduler_args.num_training_steps,
+        )
+        # self.scheduler = schedulers_registry[scheduler_name](self.optimizer, self.config.lr_scheduler_args)
+        
+        if self.config.train.checkpoint_path:
+            checkpoint = torch.load(self.config.train.checkpoint_path)
+            self.lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
 
     def setup_losses(self):
         self.loss_builder = DiffusionLossBuilder(self.config)
@@ -62,15 +85,18 @@ class BaseDiffusionTrainer(BaseTrainer):
         self.to_train()
         batch = next(self.train_dataloader)
         images = batch['images'].to(self.device)
-        noise = torch.rand(images.shape).to(images.device)
+        noise = torch.randn(images.shape).to(images.device)
         bs = images.shape[0]
         timesteps = torch.randint(0, self.noise_scheduler.num_train_timesteps, (bs,), device=images.device).long()
-        noisy_images = self.noise_scheduler.add_noise(images, noise, timesteps).to(self.device)
+        noisy_images = self.noise_scheduler.add_noise(images, noise, timesteps).to(dtype=torch.float32).to(self.device)
         noise_pred = self.model(noisy_images, timesteps, return_dict=False)[0]
         loss = self.loss_builder.calculate_loss(noise_pred, noise)[0]
         self.optimizer.zero_grad()
         loss.backward()
+        clip_grad_norm_(self.model.parameters(), 1)
         self.optimizer.step()
+        self.lr_scheduler.step()
+
         
         return {'loss': loss.item()}
 
@@ -79,6 +105,7 @@ class BaseDiffusionTrainer(BaseTrainer):
             'step': step,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.lr_scheduler.state_dict(),
         }
         torch.save(checkpoint, f'{self.config.to_save.experiment_dir}/checkpoint_{step}.pth')
 

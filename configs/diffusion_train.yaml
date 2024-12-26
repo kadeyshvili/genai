@@ -19,14 +19,15 @@ data:
 train: 
     trainer: base_diffusion_trainer 
     model: base_diffusion 
-    optimizer: adam 
-    checkpoint_path: null 
+    optimizer: adam
+    scheduler: onecycle 
+    checkpoint_path: '/home/andrewut/genai_projects_task-main-2/saved_new/checkpoint_135000.pth' 
     val_metrics: ["fid"] 
     start_step: 0 
     steps: 300000 
     log_step: 1000
     checkpoint_step: 15000 
-    val_step: 100000
+    val_step: 10000
  
  
 model: 
@@ -34,17 +35,28 @@ model:
     in_channels: 3
     out_channels: 3
     layers_per_block: 2
-    block_out_channels: [64, 128, 128, 256]
-    down_block_types: ["DownBlock2D",  "DownBlock2D","AttnDownBlock2D", "AttnDownBlock2D"]
-    up_block_types: ["AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"]
+    block_out_channels: [128, 128, 256, 256, 512, 512]
+    down_block_types: ["DownBlock2D",  "DownBlock2D","DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "DownBlock2D"]
+    up_block_types: ["UpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D"]
  
 optimizer_args: 
-    lr: 4e-4
-    weight_decay: 1e-3
+    lr: 1e-7
+    weight_decay: 1e-6
+    betas: [0.95, 0.99]
 
 scheduler_args:
     steps: 1000
+
  
+lr_scheduler_args:
+    name: cosine
+    num_warmup_steps: 500
+    num_training_steps: ${train.steps}
+    # total_steps: ${train.steps}
+    # max_lr: 1e-4
+    # pct_start: 0.1
+    # anneal_strategy: cos
+
 losses_coef: 
     mse: 1.0 
  
@@ -58,4 +70,4 @@ logger:
     id_length: 8 # length of the run_id 
  
 to_save: 
-    experiment_dir: /home/andrewut/genai_projects_task-main-2/saved
+    experiment_dir: /home/andrewut/genai_projects_task-main-2/saved_new_after_pretraining

@@ -79,7 +79,7 @@ class BaseTrainer:
             # metric = metrics_registry[metric_name](test_pth='/home/andrewut/food_data/test/apple_pie') 
             
             self.metrics.append(metric) 
- 
+
  
     def setup_logger(self): 
         self.logger = TrainingLogger(self.config) 
@@ -108,7 +108,7 @@ class BaseTrainer:
             if self.step % self.config.train.val_step == 0: 
                 val_metrics_dict, images = self.validate() 
                 print("FID:", val_metrics_dict.values())
- 
+                self.logger.log_val_metrics({"learning rate":self.lr_scheduler.get_last_lr()[0]}, step=self.step)
                 self.logger.log_val_metrics(val_metrics_dict, step=self.step) 
                 self.logger.log_batch_of_images(images, step=self.step, images_type="validation") 
  
